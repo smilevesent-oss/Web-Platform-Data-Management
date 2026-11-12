@@ -40,11 +40,13 @@ def create_schema() -> None:
 
 def ensure_rbac_and_settings(db: Session) -> None:
     perms: dict[str, Permission] = {p.code: p for p in db.scalars(select(Permission))}
+    new_codes: set[str] = set()
     for code, desc in PERMISSIONS.items():
         if code not in perms:
             p = Permission(code=code, description=desc)
             db.add(p)
             perms[code] = p
+            new_codes.add(code)
         else:
             perms[code].description = desc
     db.flush()
@@ -55,6 +57,12 @@ def ensure_rbac_and_settings(db: Session) -> None:
             role = Role(name=name, display_name=display, description=desc, is_system=True)
             role.permissions = [perms[c] for c in codes]
             db.add(role)
+        else:
+            # Upgrade path: a permission introduced in a later phase (e.g. search.manage)
+            # is granted to the roles that have it by default. Earlier edits are kept.
+            for c in codes:
+                if c in new_codes and perms[c] not in role.permissions:
+                    role.permissions.append(perms[c])
 
     for key, (value, desc) in DEFAULT_SETTINGS.items():
         if db.get(Setting, key) is None:

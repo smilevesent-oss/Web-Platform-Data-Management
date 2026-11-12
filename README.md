@@ -1,16 +1,17 @@
 # Enterprise Document & Research Repository
 
 A full-stack web application for publishing and finding internal policies, procedures and research reports.
-Phase 1 delivers complete CRUD, authentication and Role-Based Access Control (RBAC). It also lays the
-groundwork for Phase 2 (tokenization, inverted index, BM25/TF-IDF ranking) with a clean **Document Store**
-and a standardized **Search & Click Log**.
+Phase 1 delivers complete CRUD, authentication and Role-Based Access Control (RBAC) on top of a clean
+**Document Store** and a standardized **Search & Click Log**. Phase 2 adds a **search engine written from
+scratch** — tokenization, Porter stemming, a positional inverted index, TF-IDF and BM25F ranking, snippets,
+spelling suggestions — and measures it against hand-judged queries (see [section 7](#7-phase-2--search-engine)).
 
 | Layer | Technology |
 |---|---|
 | Backend | Python 3.11+ · **FastAPI** (RESTful API, OpenAPI docs at `/docs`) · SQLAlchemy 2.0 · JWT (PyJWT) · bcrypt |
 | Database | **PostgreSQL 16** (document store, logs, RBAC) |
 | Frontend | **React 18** + React Router + Vite, responsive (desktop → 360 px mobile) |
-| Tests | pytest + FastAPI TestClient against a real PostgreSQL database (18 tests) |
+| Tests | pytest + FastAPI TestClient against a real PostgreSQL database (49 tests) |
 | DevOps | Docker Compose (db + api + web), Git |
 
 ---
@@ -79,7 +80,7 @@ All accounts use the password **`Password123!`**
 | Commenting | Threaded comments (one reply level), edit/delete own comments |
 | Rating / liking | 1–5 star rating and like toggle per user |
 | User tagging | `@username` mentions with autocomplete; mentioned users see them in **Profile → Mentions** |
-| Keyword search (LIKE / regex) | Header search box → `ILIKE` on title, summary and content; every word must match; wildcards escaped; matches highlighted |
+| Keyword search (LIKE / regex) | Phase 1: `ILIKE` on title, summary and content. Still available as the "Exact words" option; Phase 2 ranks with BM25 by default (section 7) |
 | Filters: category, tag, date range | Sidebar filters (combinable with the keyword), plus document type and sort |
 
 ### B. Admin interface (RBAC)
@@ -189,7 +190,7 @@ Interactive documentation: **<http://localhost:8000/docs>**. Authentication uses
 | POST | `/api/auth/register` · `/api/auth/login` | public |
 | GET/PUT | `/api/auth/me` · POST `/api/auth/change-password` | signed in |
 | GET | `/api/me/mentions` · POST `/api/me/mentions/read` | signed in |
-| GET | `/api/documents` (`q`, `category`, `tag`, `doc_type`, `date_from`, `date_to`, `sort`, `page`, `page_size`) | public |
+| GET | `/api/documents` (`q`, `algo`=bm25/tfidf/like, `category`, `tag`, `doc_type`, `date_from`, `date_to`, `sort`=relevance/latest/…, `page`, `page_size`) | public |
 | GET | `/api/documents/{id or slug}` · `/related` · `/comments` · `/engagement` | public |
 | POST/PUT/DELETE | `/api/documents/{id}/comments` · `/api/comments/{id}` · `/like` · `/rating` · POST `/api/reports` | signed in |
 | GET | `/api/categories` · `/api/tags` · `/api/documents/doc-types` · `/api/documents/popular` · `/api/site` | public |
@@ -205,6 +206,8 @@ Interactive documentation: **<http://localhost:8000/docs>**. Authentication uses
 | GET/PUT | `/api/admin/roles` · `/api/admin/permissions` · `/api/admin/roles/{id}/permissions` | `roles.manage` |
 | GET | `/api/admin/system-logs` | `logs.view` |
 | GET/PUT | `/api/admin/settings…` | `settings.manage` |
+| GET | `/api/admin/search/stats` · `/term` · `/analyze` · `/explain` · `/evaluate` · `/evaluate/tune` | `search.manage` |
+| POST/PUT | `/api/admin/search/rebuild` · `/api/admin/search/config` | `search.manage` |
 
 ---
 
@@ -221,6 +224,11 @@ logging, click logging, the Phase 2 corpus view, registration/login/profile, val
 (every admin endpoint × every role), document CRUD and publishing, taxonomy, comments/mentions/likes/
 ratings/reports, the spam filter, moderation, SEO, analytics and every Super Admin function.
 
+Phase 2 adds `test_search_engine.py` (stemmer against the paper's examples, tokenizer, index statistics,
+BM25 checked against a hand calculation, TF-IDF bounds, query language, evaluation metrics) and
+`test_search_api.py` (ranked search vs. LIKE, stemming, filters + sorting, phrases/exclusions, spelling
+suggestion, logging, automatic re-indexing on create/unpublish, admin tools and permissions, config).
+
 ---
 
 ## 6. Project structure
@@ -234,7 +242,9 @@ backend/
     permissions.py     Permission catalogue + default roles + default settings
     deps.py            Auth dependencies and require_permissions()
     db_init.py         Creates tables, the search_corpus view and the RBAC baseline
-    routers/           auth, documents, engagement, taxonomy, moderation, admin, analytics
+    routers/           auth, documents, engagement, taxonomy, moderation, admin, analytics, search
+    search/            Phase 2 engine: tokenizer, stemmer, index, query, ranking, engine, evaluation
+      qrels.json       32 hand-judged queries used for evaluation
   seed/                seed.py + 4 files of realistic documents
   tests/               pytest suite (real PostgreSQL)
 frontend/
@@ -246,10 +256,127 @@ frontend/
 docker-compose.yml
 ```
 
-## 7. Roadmap to Phase 2
+## 7. Phase 2 — Search engine
 
-1. Read `search_corpus`, tokenize (lower-case, split on non-alphanumerics, stop words, light stemming).
-2. Build an inverted index `term → [(doc_id, tf)]` plus document lengths.
-3. Score with TF-IDF and BM25 (`k1≈1.2–2.0`, `b≈0.75`), replacing the `ILIKE` query in
-   `GET /api/documents` without changing the API contract.
-4. Evaluate against the Phase 1 baseline using `search_logs` (CTR, mean clicked rank, zero-result rate).
+The keyword search no longer uses `ILIKE`. `GET /api/documents?q=…` now goes through a search engine
+implemented from scratch in [`backend/app/search/`](backend/app/search) — no Elasticsearch, no PostgreSQL
+full-text search, no NLP library — so every step can be read and explained. The API contract is unchanged;
+results simply gain a `score` and `highlights`, and the page gains `algorithm`, `took_ms` and `suggestion`.
+
+```
+ search_corpus view ──► analyse ──► positional inverted index ──► rank (BM25F / TF-IDF) ──► filter, sort, page
+ (published docs)        │                       ▲                         │
+                         │                query ─┘ (same analyser)         └─► snippet + highlight ranges
+ normalise → tokenise → stop words → Porter stem                               did-you-mean (edit distance)
+```
+
+### 7.1 Text analysis — `tokenizer.py`, `stemmer.py`
+
+| Step | What happens | Example |
+|---|---|---|
+| Normalise | lower-case, strip accents (`é→e`, `đ→d`), offsets kept 1:1 with the original text | `Café` → `cafe` |
+| Tokenise | runs of letters/digits; possessive `'s` removed; hyphens split | `e-commerce` → `commerce` |
+| Stop words | ~130 English function words removed, **but positions still counted** so phrases keep their gaps | `the`, `of`, `and` |
+| Stem | Porter (1980) suffix stripping, written from the paper and checked against NLTK on all 2,842 corpus words | `policies`, `policy` → `polici` |
+
+The same `analyze()` runs on documents and queries, which is what makes `clicking` match `clicked`.
+
+### 7.2 Inverted index — `index.py`
+
+```
+postings[term][doc_id][field] = [positions]      fields: title, tags, summary, content, author
+```
+
+From this one structure the engine reads `tf`, `df`, field lengths and average field lengths; positions
+answer phrase queries. 55 published documents → 1,787 terms, 5,555 postings, built in ~0.1 s.
+
+**Keeping it fresh.** Before each search the engine asks PostgreSQL for a fingerprint of the published
+corpus (`count(*)` + `sum(hashtext(id‖title‖summary‖content‖tags‖author))`). Any create / edit / publish /
+unpublish / delete changes the fingerprint and the next search rebuilds the index. View counts and SEO edits
+don't touch indexed fields, so they don't trigger a rebuild. This also keeps several API workers consistent.
+
+### 7.3 Ranking — `ranking.py`
+
+**BM25F** (default) — BM25 with per-field weights and length normalisation:
+
+```
+tf~(t,d)   = Σ_f  w_f · tf_f(t,d) / (1 − b + b · |d|_f / avg|d|_f)
+idf(t)     = ln(1 + (N − df + 0.5) / (df + 0.5))
+score(d,q) = Σ_t  idf(t) · tf~ · (k1 + 1) / (k1 + tf~)          k1 = 1.2, b = 0.75
+```
+
+**TF-IDF** — vector-space cosine similarity:
+
+```
+w(t,d)     = (1 + ln Σ_f w_f·tf_f(t,d)) · ln(N / df)
+score(d,q) = Σ_t w(t,q)·w(t,d) / (|q|·|d|)
+```
+
+Field weights: title 3 · tags 2 · summary 1.5 · content 1 · author 0.5. `k1`, `b` and the default
+algorithm can be changed at runtime on **Workspace → Search engine** (stored in `settings`).
+
+### 7.4 Query language — `query.py`
+
+| Syntax | Meaning |
+|---|---|
+| `remote work` | ranked: documents with more / rarer matching terms first |
+| `"data protection"` | phrase — words adjacent, in order, in the same field |
+| `-contractor` | exclude documents containing the word |
+| `secur*` | prefix — expands to `security`, `secure`, … (weights shared so expansions don't dominate) |
+
+Filters (category, tag, type, date range) and the other sort orders still work and combine with ranking.
+Unknown words get a **"Did you mean"** suggestion (closest vocabulary word by Levenshtein distance ≤ 2,
+ties broken by frequency): `pasword polcy` → `password policy`. Results show the best-matching passage of
+the body, with matches highlighted by exact character ranges (so stemmed forms are highlighted too).
+
+### 7.5 Evaluation — `evaluation.py`, `qrels.json`
+
+32 queries were judged by hand (`2` = the answer, `1` = useful). About half are natural-language questions
+whose words don't all appear in the target document (*"what to do after clicking a suspicious link"*,
+*"why customers cancel subscriptions"*). Titles are used instead of ids so the file survives re-seeding.
+
+```bash
+cd backend
+python -m app.search.evaluate              # summary table
+python -m app.search.evaluate --per-query  # nDCG@10 per query
+python -m app.search.evaluate --tune       # BM25 k1 × b grid search
+```
+
+| System | P@5 | R@10 | MAP | MRR | nDCG@10 | Queries with 0 results |
+|---|---:|---:|---:|---:|---:|---:|
+| Phase 1 — `ILIKE`, newest first | 0.144 | 0.542 | 0.542 | 0.688 | 0.629 | 10 / 32 |
+| TF-IDF (cosine) | 0.300 | 0.958 | 0.918 | 1.000 | 0.975 | 0 |
+| **BM25F** | 0.300 | 0.958 | 0.918 | 1.000 | 0.975 | 0 |
+
+How to read it:
+
+* **Ranking vs. LIKE is the big win.** LIKE requires every word verbatim (including "what", "to", "do"),
+  so 10 queries return nothing; when it does match it orders by date, not relevance.
+* **P@5 can't reach 1.0 here**: most queries have only 1–3 relevant documents, so the best possible score is 0.32 — the engines reach 0.30.
+* **BM25 and TF-IDF tie on this set.** The documents are short and similar in length (~120 body tokens),
+  which is exactly where BM25's length normalisation and tf saturation matter least. The grid search shows
+  the same: every `k1 ∈ [0.6, 2]`, `b ∈ [0.3, 0.9]` lands between 0.912 and 0.920 MAP (nDCG@10 0.974–0.975). A larger, more varied corpus
+  and harder queries are needed to separate them — adding judged queries to `qrels.json` is the cheapest
+  way to make the comparison more discriminating.
+
+### 7.6 Workspace → Search engine (`search.manage`)
+
+Available to Super Admin and Data & SEO Specialist. Existing Phase 1 databases receive the new permission
+automatically on startup.
+
+* **Index & ranking** — index statistics, default algorithm, `k1`/`b` sliders, rebuild button, field weights
+  and the highest-df (lowest-IDF) terms.
+* **Explain a query** — how the query was parsed (stems, phrases, exclusions) and a per-term score
+  breakdown for the top 10 documents; the cells add up to the score.
+* **Inspect terms** — the analyser step by step for any text, and the postings list for any word
+  (documents, fields, positions, df, IDF).
+* **Evaluation** — the table above, the k1 × b grid and per-query results, live from the current data.
+
+### 7.7 Using the click log
+
+Every search is still logged (now with the algorithm in `filters.algo`) and result clicks record
+`rank_position`, so CTR and mean clicked rank in **Analytics** can be compared before and after switching
+algorithms. The seeded clicks were generated from the Phase 1 date ordering with a position-bias model, so
+they say nothing about relevance; that is why evaluation uses hand judgements. Natural next steps:
+click-model debiasing of real logs, query-specific click boosts, and synonym expansion
+(`working from home` ↔ `remote`).

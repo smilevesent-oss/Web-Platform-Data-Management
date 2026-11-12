@@ -75,3 +75,20 @@ export function useTitle(title) {
 export function initials(name) {
   return (name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0].toUpperCase()).join('')
 }
+
+// Highlight exact [start, end) character ranges returned by the search engine.
+// Unlike <Highlight>, this marks stemmed matches too ("policies" for a "policy" query).
+export function Marked({ text, ranges }) {
+  if (!text) return null
+  if (!ranges?.length) return text
+  const out = []
+  let pos = 0
+  ;[...ranges].sort((a, b) => a[0] - b[0]).forEach(([s, e], i) => {
+    if (s < pos) return
+    if (s > pos) out.push(<Fragment key={`t${i}`}>{text.slice(pos, s)}</Fragment>)
+    out.push(<mark key={`m${i}`}>{text.slice(s, e)}</mark>)
+    pos = e
+  })
+  if (pos < text.length) out.push(<Fragment key="end">{text.slice(pos)}</Fragment>)
+  return out
+}

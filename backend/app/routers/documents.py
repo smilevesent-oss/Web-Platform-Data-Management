@@ -15,8 +15,11 @@ from ..schemas import (
     DocumentUpdate,
     Message,
     Page,
+    SearchPage,
     StatusUpdate,
 )
+from ..search import Params
+from ..search import engine as search_engine
 from ..utils import audit, get_setting, make_summary, unique_slug
 
 router = APIRouter(tags=["documents"])
@@ -136,16 +139,39 @@ def build_detail(db: Session, doc: Document, user: User | None) -> DocumentDetai
 
 # ------------------------------------------------------ public routes ------
 
-@router.get("/documents", response_model=Page[DocumentListItem])
+def search_params(db: Session) -> Params:
+    """BM25 parameters from global settings (tunable on the Search engine page)."""
+    def num(key: str, default: float) -> float:
+        try:
+            return float(get_setting(db, key))
+        except (TypeError, ValueError):
+            return default
+
+    return Params(k1=num("search_bm25_k1", 1.2), b=num("search_bm25_b", 0.75))
+
+
+def default_algorithm(db: Session) -> str:
+    algo = get_setting(db, "search_algorithm")
+    return algo if algo in ("bm25", "tfidf", "like") else "bm25"
+
+
+@router.get("/documents", response_model=SearchPage)
 def list_documents(
     request: Request,
-    q: str | None = Query(default=None, max_length=200, description="Keyword search (LIKE)"),
+    q: str | None = Query(default=None, max_length=200, description="Keyword query. Supports \"phrases\", -exclusions and prefix*"),
     category: str | None = Query(default=None, description="Category slug or id"),
     tag: str | None = Query(default=None, description="Tag slug"),
     doc_type: str | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
-    sort: str = Query(default="latest", pattern="^(latest|oldest|views|title)$"),
+    sort: str | None = Query(
+        default=None, pattern="^(relevance|latest|oldest|views|title)$",
+        description="Defaults to relevance when q is given, otherwise latest",
+    ),
+    algo: str | None = Query(
+        default=None, pattern="^(bm25|tfidf|like)$",
+        description="Ranking algorithm (default from settings). 'like' is the Phase-1 ILIKE baseline",
+    ),
     page: int = Query(default=1, ge=1),
     page_size: int | None = Query(default=None, ge=1, le=50),
     session_id: str | None = Query(default=None, max_length=64),
@@ -154,12 +180,22 @@ def list_documents(
 ):
     q = q.strip() if q else None
     size = page_size or int(get_setting(db, "default_page_size") or 10)
-    stmt = select(Document).where(Document.status == "published")
-    stmt = apply_filters(stmt, q, category, tag, doc_type, date_from, date_to)
-    result = paginate(db, stmt, page, size, SORTS[sort])
+    algo = algo or default_algorithm(db)
+    sort = sort or ("relevance" if q else "latest")
+    if sort == "relevance" and (not q or algo == "like"):
+        sort = "latest"  # nothing to rank by
+
+    if q and algo != "like":
+        result = ranked_search(db, q, algo, sort, category, tag, doc_type, date_from, date_to, page, size)
+    else:
+        stmt = select(Document).where(Document.status == "published")
+        stmt = apply_filters(stmt, q, category, tag, doc_type, date_from, date_to)
+        result = SearchPage(**paginate(db, stmt, page, size, SORTS[sort]).model_dump())
+        if q:
+            result.algorithm = "like"
 
     if q and page == 1:
-        # Search log for Phase 2 (one row per executed query).
+        # Search log (one row per executed query) - training / evaluation data.
         db.add(
             SearchLog(
                 user_id=user.id if user else None,
@@ -176,6 +212,7 @@ def list_documents(
                         "date_from": date_from.isoformat() if date_from else None,
                         "date_to": date_to.isoformat() if date_to else None,
                         "sort": sort,
+                        "algo": algo,
                     }.items()
                     if v
                 },
@@ -183,6 +220,45 @@ def list_documents(
         )
         db.commit()
     return result
+
+
+def ranked_search(db, q, algo, sort, category, tag, doc_type, date_from, date_to, page, size) -> SearchPage:
+    """Phase 2: score with the inverted index, then filter, sort and paginate."""
+    filtering = any((category, tag, doc_type, date_from, date_to))
+    allowed = None
+    if filtering:
+        ids = apply_filters(select(Document.id).where(Document.status == "published"), None, category, tag,
+                            doc_type, date_from, date_to)
+        allowed = set(db.scalars(ids))
+    res = search_engine.search(db, q, algo, params=search_params(db), allowed_ids=allowed)
+    scores = {h.doc_id: h.score for h in res.hits}
+    total = len(res.hits)
+
+    if sort == "relevance":
+        page_ids = [h.doc_id for h in res.hits[(page - 1) * size: page * size]]
+        docs = {d.id: d for d in db.scalars(select(Document).where(Document.id.in_(page_ids))).unique()}
+        ordered = [docs[i] for i in page_ids if i in docs]
+    else:
+        stmt = select(Document).where(Document.id.in_(list(scores) or [-1]))
+        ordered = list(db.scalars(stmt.order_by(*SORTS[sort]).offset((page - 1) * size).limit(size)).unique())
+
+    items = []
+    for d in ordered:
+        item = DocumentListItem.model_validate(d)
+        item.score = round(scores[d.id], 4)
+        item.highlights = search_engine.highlights(db, d.id, res.parsed)
+        items.append(item)
+    return SearchPage(
+        items=items,
+        total=total,
+        page=page,
+        page_size=size,
+        pages=max(1, math.ceil(total / size)),
+        algorithm=algo,
+        took_ms=round(res.took_ms, 2),
+        suggestion=res.suggestion,
+        query_terms=list(res.parsed.term_weights()),
+    )
 
 
 @router.get("/documents/doc-types", response_model=list[str])

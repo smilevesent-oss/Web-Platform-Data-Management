@@ -155,6 +155,18 @@ class DocumentListItem(ORM):
     created_at: datetime
     published_at: datetime | None = None
     updated_at: datetime
+    # Present only on ranked search results (Phase 2)
+    score: float | None = None
+    highlights: dict[str, Any] | None = None
+
+
+class SearchPage(Page[DocumentListItem]):
+    """A page of documents plus search metadata when a query was given."""
+
+    algorithm: str | None = None
+    took_ms: float | None = None
+    suggestion: str | None = None
+    query_terms: list[str] = []
 
 
 class DocumentDetail(DocumentListItem):

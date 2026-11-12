@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..deps import client_ip, require_permissions
 from ..models import Permission, Role, Setting, SystemLog, User
-from ..permissions import DEFAULT_SETTINGS, ROLE_SUPER_ADMIN, SUPER_ADMIN_LOCKED
+from ..permissions import DEFAULT_SETTINGS, ROLE_SUPER_ADMIN, SEARCH_SETTINGS, SUPER_ADMIN_LOCKED
 from ..schemas import (
     AdminUserCreate,
     AdminUserOut,
@@ -244,7 +244,8 @@ def system_logs(
 
 @router.get("/settings", response_model=list[SettingOut])
 def list_settings(db: Session = Depends(get_db), _: User = Depends(require_permissions("settings.manage"))):
-    return list(db.scalars(select(Setting).order_by(Setting.key)))
+    # Search ranking settings are edited on the Search engine page (PUT /admin/search/config).
+    return [s for s in db.scalars(select(Setting).order_by(Setting.key)) if s.key not in SEARCH_SETTINGS]
 
 
 @router.put("/settings/{key}", response_model=SettingOut)
@@ -255,7 +256,7 @@ def update_setting(
     db: Session = Depends(get_db),
     admin: User = Depends(require_permissions("settings.manage")),
 ):
-    if key not in DEFAULT_SETTINGS:
+    if key not in DEFAULT_SETTINGS or key in SEARCH_SETTINGS:
         raise HTTPException(404, "Unknown setting")
     default_value = DEFAULT_SETTINGS[key][0]
     value = data.value

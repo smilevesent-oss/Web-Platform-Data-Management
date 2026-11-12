@@ -10,7 +10,7 @@ from .database import get_db
 from .db_init import init_db
 from .models import Setting
 from .permissions import DEFAULT_SETTINGS
-from .routers import admin, analytics, auth, documents, engagement, moderation, taxonomy
+from .routers import admin, analytics, auth, documents, engagement, moderation, search, taxonomy
 
 PUBLIC_SETTINGS = ("site_name", "site_tagline", "registration_open", "comments_enabled", "default_page_size")
 
@@ -23,9 +23,10 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Enterprise Document & Research Repository API",
-    version="1.0.0",
-    description="Phase 1: CRUD, authentication and RBAC. Includes the document store and "
-    "search/click logging that Phase 2 (inverted index, BM25/TF-IDF) will build on.",
+    version="2.0.0",
+    description="Phase 1: CRUD, authentication and RBAC. Phase 2: a search engine built from scratch "
+    "(tokenisation, Porter stemming, positional inverted index, TF-IDF and BM25F ranking, "
+    "snippets, did-you-mean) with offline relevance evaluation.",
     lifespan=lifespan,
 )
 
@@ -37,7 +38,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-for r in (auth, documents, engagement, taxonomy, moderation, admin, analytics):
+for r in (auth, documents, engagement, taxonomy, moderation, admin, analytics, search):
     app.include_router(r.router, prefix="/api")
 
 

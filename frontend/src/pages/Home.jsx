@@ -7,7 +7,12 @@ import Pagination from '../components/Pagination'
 import { useSite } from '../components/Layout'
 import { categoryColor, formatDate, nf, useTitle } from '../util'
 
-const FILTER_KEYS = ['q', 'category', 'tag', 'doc_type', 'date_from', 'date_to', 'sort']
+const FILTER_KEYS = ['q', 'category', 'tag', 'doc_type', 'date_from', 'date_to', 'sort', 'algo']
+const ALGORITHMS = [
+  { key: 'bm25', label: 'BM25', hint: 'Probabilistic ranking with term saturation and length normalisation' },
+  { key: 'tfidf', label: 'TF-IDF', hint: 'Vector-space cosine similarity' },
+  { key: 'like', label: 'Exact words', hint: 'Phase 1 baseline: every word must appear (SQL ILIKE), newest first' },
+]
 
 export default function Home() {
   const site = useSite()
@@ -23,7 +28,9 @@ export default function Home() {
   const q = params.get('q') || ''
   const page = Number(params.get('page') || 1)
   const filters = Object.fromEntries(FILTER_KEYS.map((k) => [k, params.get(k) || '']))
-  const filtering = FILTER_KEYS.some((k) => k !== 'sort' && filters[k])
+  const filtering = FILTER_KEYS.some((k) => k !== 'sort' && k !== 'algo' && filters[k])
+  const ranked = Boolean(q) && data?.algorithm && data.algorithm !== 'like'
+  const sortValue = filters.sort || (q && filters.algo !== 'like' ? 'relevance' : 'latest')
   useTitle(q ? `Search: ${q}` : null)
 
   useEffect(() => {
@@ -38,7 +45,7 @@ export default function Home() {
     let alive = true
     setError(null)
     api('/documents', {
-      params: { ...filters, sort: filters.sort || 'latest', page, session_id: q ? getSessionId() : undefined },
+      params: { ...filters, page, session_id: q ? getSessionId() : undefined },
     })
       .then((d) => alive && setData(d))
       .catch((e) => alive && setError(e.message))
@@ -147,6 +154,8 @@ export default function Home() {
               {data && (
                 <p className="muted">
                   {nf(data.total)} {data.total === 1 ? 'document' : 'documents'}
+                  {q && data.algorithm && ` · ${ALGORITHMS.find((a) => a.key === data.algorithm)?.label || data.algorithm}`}
+                  {data.took_ms != null && ` · ${data.took_ms} ms`}
                   {filters.date_from && ` from ${formatDate(filters.date_from)}`}
                   {filters.date_to && ` until ${formatDate(filters.date_to)}`}
                 </p>
@@ -156,7 +165,8 @@ export default function Home() {
               <button className="btn btn-ghost filters-toggle" aria-expanded={showFilters}
                 onClick={() => setShowFilters((s) => !s)}>Filters</button>
               <label htmlFor="sort" className="sr-only">Sort by</label>
-              <select id="sort" value={filters.sort || 'latest'} onChange={(e) => update({ sort: e.target.value })}>
+              <select id="sort" value={sortValue} onChange={(e) => update({ sort: e.target.value })}>
+                {q && filters.algo !== 'like' && <option value="relevance">Most relevant</option>}
                 <option value="latest">Newest first</option>
                 <option value="oldest">Oldest first</option>
                 <option value="views">Most viewed</option>
@@ -165,6 +175,25 @@ export default function Home() {
             </div>
           </div>
 
+          {q && (
+            <div className="search-meta">
+              <div className="segmented" role="group" aria-label="Ranking algorithm">
+                {ALGORITHMS.map((a) => {
+                  const on = (data?.algorithm || filters.algo || 'bm25') === a.key
+                  return (
+                    <button key={a.key} className={on ? 'on' : ''} aria-pressed={on} title={a.hint}
+                      onClick={() => update({ algo: a.key, sort: '' })}>{a.label}</button>
+                  )
+                })}
+              </div>
+              <span className="muted small">Tip: use "quotes" for a phrase, -word to exclude, secur* for a prefix.</span>
+            </div>
+          )}
+          {data?.suggestion && (
+            <p className="did-you-mean">
+              Did you mean <Link to={`/?${new URLSearchParams({ q: data.suggestion }).toString()}`}><strong>{data.suggestion}</strong></Link>?
+            </p>
+          )}
           <Notice>{error}</Notice>
           {!data && !error && <p className="muted">Loading documents…</p>}
           {data && data.items.length === 0 && (
@@ -176,7 +205,7 @@ export default function Home() {
           )}
           <div className="doc-list">
             {data?.items.map((d, i) => (
-              <DocCard key={d.id} doc={d} query={q}
+              <DocCard key={d.id} doc={d} query={q} showScore={ranked}
                 onOpen={q ? () => logClick(q, d.id, (data.page - 1) * data.page_size + i + 1) : undefined} />
             ))}
           </div>

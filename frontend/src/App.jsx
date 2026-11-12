@@ -16,6 +16,7 @@ import Reports from './pages/admin/Reports'
 import SEO from './pages/admin/SEO'
 import Analytics from './pages/admin/Analytics'
 import SearchLogs from './pages/admin/SearchLogs'
+import SearchEngine from './pages/admin/SearchEngine'
 import Users from './pages/admin/Users'
 import Roles from './pages/admin/Roles'
 import Settings from './pages/admin/Settings'
@@ -62,6 +63,7 @@ export default function App() {
           <Route path="seo" element={<RequirePerm perm="seo.manage"><SEO /></RequirePerm>} />
           <Route path="analytics" element={<RequirePerm perm="analytics.view"><Analytics /></RequirePerm>} />
           <Route path="search-logs" element={<RequirePerm perm="analytics.view"><SearchLogs /></RequirePerm>} />
+          <Route path="search" element={<RequirePerm perm="search.manage"><SearchEngine /></RequirePerm>} />
           <Route path="users" element={<RequirePerm perm="users.manage"><Users /></RequirePerm>} />
           <Route path="roles" element={<RequirePerm perm="roles.manage"><Roles /></RequirePerm>} />
           <Route path="settings" element={<RequirePerm perm="settings.manage"><Settings /></RequirePerm>} />

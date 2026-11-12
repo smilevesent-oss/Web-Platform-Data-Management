@@ -1,8 +1,9 @@
 import { Link } from 'react-router-dom'
-import { categoryColor, formatDate, Highlight, nf } from '../util'
+import { categoryColor, formatDate, Highlight, Marked, nf } from '../util'
 
-export default function DocCard({ doc, query, onOpen }) {
+export default function DocCard({ doc, query, onOpen, showScore }) {
   const color = categoryColor(doc.category?.slug)
+  const hl = doc.highlights
   return (
     <article className="doc-card" style={{ '--tab': color }}>
       <div className="doc-card-tab">
@@ -11,10 +12,22 @@ export default function DocCard({ doc, query, onOpen }) {
       <div className="doc-card-body">
         <h3 className="doc-card-title">
           <Link to={`/documents/${doc.slug}`} onClick={onOpen}>
-            <Highlight text={doc.title} query={query} />
+            {hl ? <Marked text={doc.title} ranges={hl.title} /> : <Highlight text={doc.title} query={query} />}
           </Link>
+          {showScore && doc.score != null && (
+            <span className="score" title="Relevance score from the ranking algorithm">{doc.score.toFixed(3)}</span>
+          )}
         </h3>
-        <p className="doc-card-summary"><Highlight text={doc.summary} query={query} /></p>
+        {hl ? (
+          <>
+            <p className="doc-card-summary"><Marked text={doc.summary} ranges={hl.summary} /></p>
+            {hl.snippet_ranges?.length > 0 && (
+              <p className="doc-card-snippet"><Marked text={hl.snippet} ranges={hl.snippet_ranges} /></p>
+            )}
+          </>
+        ) : (
+          <p className="doc-card-summary"><Highlight text={doc.summary} query={query} /></p>
+        )}
         <div className="doc-card-meta">
           {doc.category && (
             <Link to={`/?category=${doc.category.slug}`} className="cat-link" style={{ color }}>{doc.category.name}</Link>

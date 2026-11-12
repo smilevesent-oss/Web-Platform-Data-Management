@@ -21,6 +21,8 @@ PERMISSIONS: dict[str, str] = {
     # Data & SEO Specialist
     "seo.manage": "Edit SEO metadata (title, description, keywords, image alt text)",
     "analytics.view": "View analytics dashboards and search/click logs",
+    # Phase 2 search engine
+    "search.manage": "Inspect the search index, tune ranking (BM25 k1/b) and run relevance evaluation",
 }
 
 ROLE_SUPER_ADMIN = "super_admin"
@@ -56,7 +58,7 @@ DEFAULT_ROLES: dict[str, tuple[str, str, list[str]]] = {
     ROLE_SEO: (
         "Data & SEO Specialist",
         "Configures SEO metadata and monitors analytics dashboards.",
-        ["documents.read_all", "seo.manage", "analytics.view"],
+        ["documents.read_all", "seo.manage", "analytics.view", "search.manage"],
     ),
     ROLE_USER: (
         "Member",
@@ -76,4 +78,11 @@ DEFAULT_SETTINGS: dict[str, tuple[object, str]] = {
     "comments_enabled": (True, "Allow members to comment on documents"),
     "comments_require_approval": (False, "New comments are held as 'pending' until a moderator approves them"),
     "default_page_size": (10, "Default number of documents per page"),
+    # Phase 2 ranking (edited on the admin "Search engine" page)
+    "search_algorithm": ("bm25", "Default ranking algorithm for keyword search: bm25, tfidf or like"),
+    "search_bm25_k1": (1.2, "BM25 k1: term-frequency saturation (typical 0.9-2.0)"),
+    "search_bm25_b": (0.75, "BM25 b: document-length normalisation (0 = none, 1 = full)"),
 }
+
+# Settings shown on the Search engine page rather than the generic settings page.
+SEARCH_SETTINGS = ("search_algorithm", "search_bm25_k1", "search_bm25_b")

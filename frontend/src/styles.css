@@ -348,6 +348,25 @@ ol.plain-list li a { flex: 1; }
 .setting .row input { max-width: 420px; }
 
 /* ------------------------------------------------------------ responsive -- */
+/* ---- Phase 2: ranked search ------------------------------------------- */
+.search-meta { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; margin-bottom: .9rem; }
+.search-meta .segmented { margin-bottom: 0; }
+.did-you-mean { background: var(--warn-bg); border: 1px solid var(--line-soft); border-radius: var(--r-md); padding: .55rem .9rem; }
+.doc-card-title .score { margin-left: .5rem; font: 500 .74rem/1 var(--sans); color: var(--muted); background: var(--line-soft); border-radius: 999px; padding: .2rem .5rem; vertical-align: middle; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.doc-card-snippet { font-size: .9rem; color: var(--ink-2); border-left: 3px solid var(--line); padding-left: .7rem; margin: -.3rem 0 .7rem; }
+
+/* ---- Phase 2: search engine workspace ----------------------------------- */
+.search-engine .page-head { flex-wrap: wrap; gap: .75rem; }
+.search-engine .toolbar input[type='search'] { max-width: 420px; flex: 1 1 260px; }
+.search-engine input[type='range'] { padding: 0; min-height: 0; accent-color: var(--accent); }
+.chips { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: .6rem; }
+.chip { background: var(--paper); border: 1px solid var(--line-soft); border-radius: 999px; padding: .2rem .65rem; font-size: .88rem; }
+.chip-phrase { border-color: var(--accent); }
+.chip-out { border-color: var(--danger); color: var(--danger); }
+.explain-table td:nth-child(2) { min-width: 240px; }
+.score-bar { display: block; height: 4px; background: var(--line-soft); border-radius: 2px; margin-top: .3rem; }
+.score-bar span { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
+
 @media (max-width: 1000px) {
   .doc-layout { grid-template-columns: 1fr; }
   .doc-aside { position: static; }

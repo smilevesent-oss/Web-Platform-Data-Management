@@ -18,7 +18,8 @@ export const ADMIN_SECTIONS = [
     group: 'SEO & data', role: 'Data & SEO Specialist', items: [
       { to: 'seo', label: 'SEO metadata', perm: 'seo.manage', desc: 'Titles, descriptions, keywords and alt text.' },
       { to: 'analytics', label: 'Analytics', perm: 'analytics.view', desc: 'Views, searches and click-through.' },
-      { to: 'search-logs', label: 'Search & click log', perm: 'analytics.view', desc: 'Raw query and click events for Phase 2.' },
+      { to: 'search-logs', label: 'Search & click log', perm: 'analytics.view', desc: 'Raw query and click events.' },
+      { to: 'search', label: 'Search engine', perm: 'search.manage', desc: 'Inverted index, BM25 / TF-IDF tuning and relevance evaluation.' },
     ],
   },
   {
